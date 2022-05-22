@@ -30,6 +30,7 @@ class AnalysisQA(object):
         self.mkdir(self.img_root)
         self.contents = dict()  # 存储word答案中的纯文字
         self.images = dict()  # 存储word答案中的图片
+        self.qa_list = list()  # 最终解析出的qa列表
 
     @staticmethod
     def get_picture(document: Document, paragraph: Paragraph):
@@ -95,10 +96,48 @@ class AnalysisQA(object):
                 if not self.contents.get(title, ""):
                     self.contents[title] = content
 
-    def save_db(self, data):
-        """将解析到的问答数据存入数据库，脚本暂不实现
+    def save_qa(self, excel_data: list, flag: str = ''):
+        """将问题和答案组装存入内存中
+        情况1：问题和答案都在 excel中, flag='excel'
+        情况2：问题在 excel中，答案在 word中, flag='both'
+        :param excel_data: excel解析后的问答数据
+        :param flag: 标识字段，标识哪种类型的解析
         """
-        pass
+        if flag == 'both':
+            for row in excel_data:
+                que, ans = self.get_qa(row)
+                self.qa_list.append({que: ans})
+        elif flag == 'excel':
+            for row in excel_data:
+                que, ans = row.get('问题', ''), row.get('答案', '')
+                self.qa_list.append({que: ans})
+        else:
+            raise Exception('未知flag')
+
+    def get_qa(self, row):
+        """获取 excel中每个问题和对应答案
+        :param row: excel中每一行数据
+        :return que: 问题, ans: 答案
+        """
+        question = row.get('问题', '')
+        content, img = "", ""
+        # excel中的填写的答案，可能是一个word链接
+        answer_excel = row.get('答案', '')
+        if '.docx' in answer_excel:
+            # 存在用户上报的问答中，没有填写序号或者根据序号没找到对应答案的情况，都将序号置为0，item['答案']=''
+            serial_mum = row.get('序号', '')
+            serial_num_tmp = int(serial_mum) if serial_mum and isinstance(serial_mum, float) else 0
+            serial_mum_str = str(serial_num_tmp) + '.'
+            for key, value in self.contents.items():
+                if not content:
+                    content = '<p>{}</p>'.format(value) if key.startswith(serial_mum_str) else content
+            for key, value in self.images.items():
+                if not img:
+                    img = '<img class="global-width" src="/{}/{}.png" alt="{}"/>'.format(
+                        self.relative_img_path, key, key) \
+                        if key.startswith(serial_mum_str) else img
+        answer = content + img
+        return question, answer
 
     @staticmethod
     def mkdir(path):
@@ -125,20 +164,18 @@ class AnalysisQA(object):
         if len(self.file_path) == 2 and all([self.docx_path, self.excel_path]):
             # 传入了word和excel文件，先解析word再解析excel。
             self.analysis_word()
-            self.analysis_excel()
-        elif len(self.file_path) == 1 and any([self.docx_path, self.excel_path]):
-            if self.excel_path:
-                # 只传入了excel文件，解析excel。
-                self.analysis_excel()
-            else:
-                # 只传入了word文件，解析word。
-                self.analysis_word()
+            excel_data = self.analysis_excel()
+            self.save_qa(excel_data, flag='both')
+        elif len(self.file_path) == 1 and self.excel_path:
+            # 只传入了excel文件，解析excel。
+            excel_data = self.analysis_excel()
+            self.save_qa(excel_data, flag='excel')
         else:
             raise Exception('解析异常，请检查文件路径')
+        print(self.qa_list)
 
 
 if __name__ == '__main__':
-    # obj = AnalysisQA(file_path=['docs/test.xlsx'])
-    # obj = AnalysisQA(file_path=['docs/知识的力量.docx']).run()
-    # obj = AnalysisQA(file_path=['docs/test.xlsx', 'docs/test.docx'])
+    # obj = AnalysisQA(file_path=['docs/问答数据导入模板.xlsx']).run()
+    obj = AnalysisQA(file_path=['docs/问答数据导入模板1.xlsx', 'docs/知识的力量.docx']).run()
     pass
